@@ -1,0 +1,33 @@
+[]x should happen before arithmetic.
+
+3 + \n
+	3
+	+ OP_PENDING
+
+3 [+]x 5
+	3
+	+ OP_PENDING
+	5
+
+[3+]x 5
+	3
+	+ OP_PENDING
+	5
+
+
+-3 + 5 Should still be negative three on the lefthand side.
+
+
+
+
+
+3+-2
+	negation on the top of stack because of precedence.
+
+
+-f(x)
+	do f(x) first.
+
+[3]x
+
+[3]x+6p

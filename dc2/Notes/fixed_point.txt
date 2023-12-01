@@ -1,0 +1,24 @@
+//TODO: add fixed point type.
+	//https://www.eetimes.com/fixed-point-dsp-and-algorithm-implementation/
+	//One's compliment has +0 and -0.
+		//Not worth it. Use Two's compliment.
+	//Multiplying two 16 bit numbers can require up to (& incl'n') 32 bits.
+		//But, you can truncate the LSBs in the fractional part.
+			//This can be done by shifting the fractional part right.
+			//However, shifting isn't as accurate as rounding with gaurds.
+		//Keep track of the radix point b/c multiplication moves it.
+			//Changing bases is an extension of multiplication.
+		//Guard bit.
+			//You can have arbitrary guard bits with arbitrary percision.
+			//You only have to truncate the numbers when printing.
+				//Although, someone may expect 3/2 to be exactly 1.
+					//Yeah, dc1 doesn't seem to use guard bits.
+					//Being able to round when precision != 0 sounds good.
+		//Start precision at like 10 or something.
+	//
+//MEMO: FLOATING point is more helpful.
+	//You need to change where the radix is anyway.
+	//Truncating precision at 0 is not a common need.
+	//Truncating precision anywhere else is also generally a bad idea.
+	//Adding precision for large decimals would be cool but
+	//that much precision isn't generally helpful.

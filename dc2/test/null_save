@@ -1,0 +1,33 @@
+#!/bin/bash
+
+cd "${0%/*}";
+
+../dc2 < "${0##*/}.in" 2>log.err >log.out;
+e="$?";
+out="$(<log.out)";
+err="$(<log.err)";
+
+expected_err="Choosing to not use variable named null byte.";
+expected_err+=$'\nLine 1 ignored.';
+
+expected_out=$'5';
+end_status=0;
+
+if [ "$err" != "$expected_err" ];then
+	end_status=1;
+	printf '%s\n' \
+		"$0: Expected error($expected_err) didn't match ($err)." >&2;
+fi
+
+if [ "$out" != "$expected_out" ];then
+	end_status=1;
+	printf '%s\n' \
+		"$0: Expected output($expected_out) didn't match ($out)." >&2;
+fi
+
+if [ "$e" != 0 ];then
+	end_status=1;
+	printf '%s\n' "$0 exited with $e unexpectedly." >&2;
+fi
+
+exit "$end_status";

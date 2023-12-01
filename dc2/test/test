@@ -1,0 +1,359 @@
+#!/bin/bash
+
+cd "${0%/*}/..";
+out_fh='./test/log.out';
+err_fh='./test/log.err';
+in_fh='./test/log.in';
+
+blue="$(tput setaf 6)";
+sgr0="$(tput sgr0)";
+blue_out(){
+	printf '%s%s(%s' "$blue" "$1" "$sgr0";
+	printf '%s' "$2";
+	printf '%s)%s'   "$blue" "$sgr0";
+}
+
+
+die(){
+	printf '%s\n' "$1" >&2;
+	exit 1;
+}
+
+trace(){
+	local frame=() f=1;
+	while :;do
+		read -a frame<<<"$(caller "$f")";
+		[ "${frame[1]}" = 'main' ] && break;
+		((++f));
+	done
+
+	printf '%s line %d\n' "${frame[*]:2}" "${frame[0]}" >&2;
+}
+
+#\! is an optional opt for when you want stderr but also exit with status 0.
+#-f and -e are optional flags for $prog.
+#$input will be $1 b/c the earlier opts get shifted out.
+#$expected_output is $2
+#$expected_stderr is $3 (when available).
+try(){ #[\!] [-f|-e|--] $input $expected_output [$expected_stderr]
+	local errored=;
+	local actual_stdout=;
+	local actual_stderr=;
+	local invert_err_opt=0;
+	local ran_prog=0;
+
+
+	if [ "$1" = '!' ];then
+		#For when you want stderr but also exit with status 0.
+		local invert_err_opt=1;
+		shift;
+	fi
+
+	if [ "${1:0:1}" = '-' ];then
+		case "${1:1:1}" in
+		e|f) #expression and file flag for $prog.
+			"./$prog" "$1" "$2" > "$out_fh" 2> "$err_fh";
+			errored="${PIPESTATUS[0]}";
+			actual_stdout="$(<"$out_fh")";
+			actual_stderr="$(<"$err_fh")";
+			ran_prog=1;
+			if [ "${1:1:1}" = 'f' ];then
+				set -- "$(<"$2")" "${@:3}";
+			else
+				shift;
+			fi
+
+			;;
+		-) shift;;
+		*) die "Unrecognized option in try ($1).";;
+		esac
+	fi
+
+	if ((!ran_prog));then
+		printf '%s' "$1" | "./$prog" > "$out_fh" 2> "$err_fh";
+		errored="${PIPESTATUS[1]}";
+		actual_stdout="$(<"$out_fh")";
+		actual_stderr="$(<"$err_fh")";
+	fi
+
+	((invert_err_opt)) && errored="$((! errored))";
+	quit=0;
+
+	if [ "$actual_stdout" != "$2" ];then
+		trace;
+		printf '%s\n%s\n'\
+			"$(blue_out '  actual_stdout' "$actual_stdout")" \
+			"$(blue_out 'expected_stdout' "$2")" >&2;
+		quit=1;
+	fi
+
+	#If $3 isn't given then [ '' != '' ] is tried.
+	#But, that's fine b/c the expected and actual stderr match.
+	if [ "$actual_stderr" != "$3" ];then
+		((! quit)) && trace;
+		quit=1;
+		printf '%s\n%s\n'\
+			"$(blue_out '  actual_stderr' "$actual_stderr")" \
+			"$(blue_out 'expected_stderr' "$3")" >&2;
+	fi
+
+	#    errored and     $3 => no trace
+	#    errored and not $3 =>    trace
+	#not errored and     $3 =>    trace
+	#not errored and not $3 => no trace
+	if
+		{   ((errored)) && [ -z "$3" ]; } ||
+		{ ((! errored)) && [ -n "$3" ]; };
+	then
+		((! quit)) && trace;
+		quit=1;
+		printf '%s exited with error status %d.\n' "$prog" "$errored" >&2;
+	fi
+
+	if ((quit));then
+		printf '%s\n' "$(blue_out input "$1")";
+		printf '%s\n' "$1" > "$in_fh";
+		exit 1;
+	fi
+}
+
+prog='./tokenizer';
+ignored=$'\nLine 1 ignored.';
+line1='on line 1.';
+
+#     12    (2 spaces test).
+try '3  p' $'|3|\n|p|';
+
+output=$'|(|\n|3|\n|+|\n|5|\n|)|';
+for input in '(3+5)' $'(3+5)\n';do
+	try "$input" "$output";
+done
+
+output=$'|3|\n|p|\n|q|';
+for input in '3pq' $'3pq\n';do
+	try "$input" "$output";
+done
+
+input='(3+5)*(2+2)';
+output=$'|(|\n|3|\n|+|\n|5|\n|)|\n|*|\n|(|\n|2|\n|+|\n|2|\n|)|';
+try "$input" "$output";
+
+input=$'#Huh?\n#Huh?'
+output=$'|#|\n|#|';
+try "$input" "$output";
+try -e "$input" "$output";
+
+output=$'|3|\n|d|\n|*|\n|p|';
+try -e '3d*p' "$output";
+try -e $'3d*\np' "$output";
+
+try '3[xyz]sa' $'|3|\n|[|\n|xyz|\n|]|\n|s|\n|a|';
+try $'3[xy\nz]sa' $'|3|\n|[|\n|xy\nz|\n|]|\n|s|\n|a|';
+try '[\[foo\]]d' $'|[|\n|\[foo\]|\n|]|\n|d|';
+try '[\\]' $'|[|\n|\\\\|\n|]|';
+
+input='[hey';
+try "$input" '' "String didn't end (${input:1}).$ignored";
+
+#The input isn't infinite because tokenizer.consume() needs to halt.
+input="$(./test/f)"; #[fffffffffffffff...
+try "$input" '' "String didn't end (${input:1:40}...).$ignored";
+
+#Executing the input would be full of errors, but we are just tokenizing.
+try "${input:1}" '' "Ran out of room for tokens $line1$ignored";
+
+try ']' '' "Unexpected ].$ignored";
+
+#Decimal tests:
+try '1.2' '|1.2|';
+try '.02' '|0.02|';
+try '.3+5' $'|0.3|\n|+|\n|5|';
+try '3+.5' $'|3|\n|+|\n|0.5|';
+try '1.2.3p' '' "Bad token (1.2.3) $line1$ignored";
+try '1.2.3.4p' '' "Bad token (1.2.3.4) $line1$ignored";
+try '..p' '' "Bad token (..) $line1$ignored";
+try '3+.p' '' "Bad token (.) $line1$ignored";
+
+try '3+4 5f' $'|3|\n|+|\n|4|\n| |\n|5|\n|f|';
+try '3+4 5+6' $'|3|\n|+|\n|4|\n| |\n|5|\n|+|\n|6|';
+
+#Test invalid tokens:
+try '@3' $'|@|\n|3|';
+try '3@' $'|3|\n|@|';
+try '@.3' $'|@|\n|0.3|';
+try '.3@' $'|0.3|\n|@|';
+try '@@' $'|@|\n|@|';
+
+#File test:
+printf '%s\n' '30d*p' > "$in_fh" ;
+try -f "$in_fh" $'|30|\n|d|\n|*|\n|p|';
+prog='./dc2' try -f "$in_fh" '900';
+prog='./dc2' try -e '3d*p' '9';
+
+#Multiple lines in file test:
+printf '%s\n' '3' '5' '7' 'f' > "$in_fh";
+try -f "$in_fh" $'|3|\n|5|\n|7|\n|f|';
+prog='./dc2' try -f "$in_fh" $'7\n5\n3';
+prog='./dc2' try -e $'3\n5f' $'5\n3';
+
+
+#######################
+prog='./dc2';
+#######################
+
+
+output='6';
+for input in $'3*2\np' $'3*2\npq' '3*2p' '3*2pq';do
+	try "$input" "$output";
+done
+
+input=$'3\nc5d\nf';
+output=$'5\n5';
+try "$input" "$output";
+
+#Perhaps this should output 7. FIXME?
+	#Nah, dogmatically evaluating parens first can lead to problems.
+	#Ex.: 8÷2(2+2)
+	#     8÷2(4) But, the stack has * on top now, leading to the wrong value.
+	#See https://www.youtube.com/watch?v=vaitsBUyiNQ for more detail.
+try '7(3+5c)f' '';
+
+try '3+4 5f' $'5\n7';
+try '3+4 5+6f' $'11\n7';
+
+#Paren test:
+try '()' '';
+try '(' '' "Unmatched ( $line1";
+try ')' '' "Unmatched ) $line1";
+
+input='3d5f';
+output=$'5\n3\n3';
+try "$input" "$output";
+
+input='3ddf';
+output=$'3\n3\n3';
+try "$input" "$output";
+try '3d*p' '9';
+try '3d_f' '3';
+try '1 2f' $'2\n1';
+
+output=$'35\n35';
+try $'(3d++1)*5dfcf#foo bar\nq' "$output";
+try $'5*(3d++1)dfcf#foo bar\nq' "$output";
+
+try '25%9p' '7';
+
+#Negative numbers:
+try '2--2p' '4';
+try -- '-3^2p' '-9';
+try -- '-1+-2p' '-3';
+try -- '-1+--2p' '1';
+try '3p(-5)p' $'3\n-5';
+try -- '-(2+3)p' '-5';
+try '7+-(2+3)p' '2';
+try '(-)' '' 'Stack empty.';
+
+##Exponentiation:
+try '2^3p' '8';
+try '2.5^2p' '6.25';
+try '4^.5p' '2';
+try '2^0p' '1';
+try '2^1p' '2';
+try '2^(0-2)p' '0.25';
+try '2^-2p' '0.25';
+
+##Save and load tests:
+try '3saflaf' '3';
+try $'3\nsa\nflaf' '3';     #Identifier copy test.
+try $'[hi]\nsa\nflaf' 'hi'; #String copy test.
+try '3d*saflaf' '9';
+try 'lap' '0'; #`a' is undefined.
+try $'3sa\n5+lap' '8';
+try '3+5*7sa lap' '38';
+try '3s[' '' "Choosing to not use variable named \"[\".$ignored"
+
+./test/null_save || exit;
+
+##Miscellaneous stderr tests:
+try 'pq' '' 'Stack empty.';
+for input in '_' 'p' 't';do
+	try "${input}q" '' 'Stack empty.';
+done
+
+bin_ops=(\+ \- \* \/ \% \^);
+for bin_op in "${bin_ops[@]}";do
+	try "()${bin_op}1" '' "Missing operand to $bin_op.";
+	try "1${bin_op}()" '' "Missing operand to $bin_op.";
+done
+
+try $'5\n()-2p' '3';
+
+##String tests:
+try '[foo]p' 'foo';
+try '[foo]d[bar]rfcf' $'foo\nbar\nfoo';
+try '[foo]t[bar]t' 'foobar';
+try '[foo]tt' 'foofoo';
+
+##Escape string escape tests:
+try '[\\]p' '\';
+try '[\]]p' ']';
+try '[[\]]]p' '[\]]';
+try '[[\\]]p' '[\\]';
+try '[a\nb]p' $'a\nb';
+try '[[a\nb]]p' '[a\nb]';
+
+##x operator tests:
+try '[3p]xf' $'3\n3';
+try '[[\]]]xp' ']';
+try -- '-([3]x)p' '-3';
+try -- '-([3]x+5)p' '-8';
+try '3+[5]xp' '8';
+try '[3]x+5p' '8';
+try '([(3)+5]x)p' '8';
+try '([()+1]x)p' '' "Missing operand to +.";
+
+##Decimal tests:
+try '.25+.5p' '0.75';
+try '3+.5p' '3.5';
+try '.3+5p' '5.3';
+try '1/2p' '0.5';
+
+mismatched_types_str(){
+	printf 'Mismatched types with %s operator.\n' "$1";
+	printf 'Stopped execution for line %d.\n' "$2";
+}
+
+#Type check:
+try \! $'[s]^3\nf' $'3\ns' "$(mismatched_types_str '^' 1)";
+try \! $'3+[s]\nf' $'s\n3' "$(mismatched_types_str '+' 1)";
+
+#? tests:
+#The second line ("5\n") simulates a user inputting a second line themself.
+try $'3+?p\n5\n' '8';
+try $'3+?p\n5' '8';
+try $'3+?p\n-7' '-4';
+try $'3+?p\n---7' '-4';
+
+try $'3.7+?p\n5.4\n' '9.1';
+
+input='1.2.3';
+#try $'3.7+?p\n'"$input" '' "Bad token ($input) $line1$ignored"
+try $'3.7+?p\n'"$input" '' "$(printf 'Bad token (%s) %s\n%s' \
+	"$input" "$line1$ignored" "Expected a number from input ($input)."
+)";
+
+for input in '--' '3x';do
+	try $'3.7+?p\n'"$input" '' "Expected a number from input ($input).";
+done
+
+input='3+?p';
+output="$(printf '5' | "$prog" -e $input)";
+if [ "$output" != '8' ];then
+	printf '%s: line %d\ninput: %s\nuser input: 5\n output: %s\n'\
+		"$0" "$((LINENO - 3))" "$input" "$output";
+	exit 1;
+fi
+
+./hash -q || exit;
+
+printf 'All tests passed.\n';

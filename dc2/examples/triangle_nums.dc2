@@ -1,0 +1,12 @@
+
+#Triangle numbers: sum the rows of a triangle,
+#such that each row is 1 longer than the last.
+# (x^2+x)/2 = Σi = 1 + 2 + 3 + 4 ...
+
+0       dsi  p
++ (li+1 dsi) p
++ (li+1 dsi) p
++ (li+1 dsi) p
++ (li+1 dsi) p
+#If-statements aren't implemented yet,
+#so if I did recursion, it wouldn't halt.

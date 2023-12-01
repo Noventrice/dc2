@@ -1,0 +1,25 @@
+Jumping to parens to execute them early is actually not a good idea.
+	You should read left to right.
+	Ex.: 8÷2(2+2)
+	     8÷2(4) But, the stack has * on top now, leading to the wrong value.
+	See https://www.youtube.com/watch?v=vaitsBUyiNQ for more detail.
+
+If the tokenizer doesn't pass type info to the execion phase,
+then you end up re-evaluating tokens to find what type they are.
+	Therefore, the tokenizer should pass type information to exec.
+	The type information is easier to store with the token.
+	So, storing a string of null-terminated strings isn't the way to go.
+		"13\0+\037\0\0" //No.
+		Unfortunately, the original tokenizer had the assumption that
+		this was a good way to do things.
+		This is how strtok works, BTW.
+
+The space character is itself a kind of operator.
+
+Theoretically, you could make a ; end of expression
+	to check your expression really ended properly.
+; also would make negation easier to in some cases write `(-3)' vs `;-3'.
+
+You can't negate numbers before exponentiation,
+so you can't take the shortcut of saving a number a negative whenever
+you see a negation operator.
